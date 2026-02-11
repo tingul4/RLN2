@@ -1,0 +1,17 @@
+torch
+torchvision
+kornia
+timm
+scikit-image
+lpips
+pyyaml
+opencv-python
+tqdm
+numpy
+tensorboard
+lmdb
+addict
+yapf
+future
+requests
+-e .

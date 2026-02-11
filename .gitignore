@@ -1,7 +1,11 @@
-RLN2_results/*
-weights/*
-checkpoints/*
-datasets/*
+RLN2_results/
+weights/
+checkpoints/
+datasets/
 *.zip
-.idea/*
-__pycache__/*
+.idea/
+__pycache__/
+.venv/
+experiments/
+*.egg-info/
+tb_logger/

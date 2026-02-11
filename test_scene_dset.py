@@ -35,63 +35,74 @@ def pad_if_needed(img):
         return img
 
 
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Image Enhancement using RLN2')
-    parser.add_argument('--mode', type=str, default="model", help='GPU devices.')
-    parser.add_argument('--result_dir', default='./RLN2_results/',
-                        type=str, help='Directory for results')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Image Enhancement using RLN2")
+    parser.add_argument("--mode", type=str, default="model", help="GPU devices.")
     parser.add_argument(
-        '--opt', type=str, default='Options/RLN2-Lf.yml', help='Path to option YAML file.')
-    parser.add_argument('--weights', default='checkpoints/RLN2-Lf/best_psnr_20.51_5600.pth',
-                        type=str, help='Path to weights')
-    parser.add_argument('--dataset', default='CL3AN', type=str,
-                        help='Test Dataset')
-    parser.add_argument('--gpus', type=str, default="0", help='GPU devices.')
-    parser.add_argument('--H', type=int, default=1080, help='Image Height.')
-    parser.add_argument('--W', type=int, default=1440, help='Image Width.')
+        "--result_dir",
+        default="./RLN2_results/",
+        type=str,
+        help="Directory for results",
+    )
+    parser.add_argument(
+        "--opt",
+        type=str,
+        default="Options/RLN2-Lf.yml",
+        help="Path to option YAML file.",
+    )
+    parser.add_argument(
+        "--weights",
+        default="checkpoints/RLN2-Lf/best_psnr_20.51_5600.pth",
+        type=str,
+        help="Path to weights",
+    )
+    parser.add_argument("--dataset", default="CL3AN", type=str, help="Test Dataset")
+    parser.add_argument("--gpus", type=str, default="0", help="GPU devices.")
+    parser.add_argument("--H", type=int, default=1080, help="Image Height.")
+    parser.add_argument("--W", type=int, default=1440, help="Image Width.")
 
     args = parser.parse_args()
 
-    gpu_list = ','.join(str(x) for x in args.gpus)
-    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
-    print('export CUDA_VISIBLE_DEVICES=' + gpu_list)
+    gpu_list = ",".join(str(x) for x in args.gpus)
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_list
+    print("export CUDA_VISIBLE_DEVICES=" + gpu_list)
 
     yaml_file = args.opt
     weights = args.weights
     print(f"dataset {args.dataset}")
 
     opt = parse(args.opt, is_train=False)
-    opt['dist'] = False
+    opt["dist"] = False
 
-    x = yaml.load(open(args.opt, mode='r'), Loader=Loader)
-    s = x['network_g'].pop('type')
+    x = yaml.load(open(args.opt, mode="r"), Loader=Loader)
+    s = x["network_g"].pop("type")
 
     model_restoration = create_model(opt).net_g
-    checkpoint = torch.load(weights)
-    # model_restoration.load_state_dict(checkpoint['params'])
 
-    try:
-        model_restoration.load_state_dict(checkpoint['params'])
-    except:
-        new_checkpoint = {}
-        for k in checkpoint['params']:
-            new_checkpoint['module.' + k] = checkpoint['params'][k]
-        model_restoration.load_state_dict(new_checkpoint)
+    # Handle missing or mismatching weights gracefully
+    if os.path.exists(weights):
+        checkpoint = torch.load(weights)
+        try:
+            model_restoration.load_state_dict(checkpoint["params"])
+        except:
+            new_checkpoint = {}
+            for k in checkpoint["params"]:
+                new_checkpoint["module." + k] = checkpoint["params"][k]
+            model_restoration.load_state_dict(new_checkpoint)
+        print("===>Testing using weights: ", weights)
+    else:
+        print(
+            f"Warning: Weights not found at {weights}. Running with random initialization."
+        )
 
-
-    print("===>Testing using weights: ", weights)
     model_restoration.cuda()
     model_restoration = nn.DataParallel(model_restoration)
     model_restoration.eval()
 
-
     # create dirs for results
     dataset = args.dataset
-    config = os.path.basename(args.opt).split('.')[0]
-    checkpoint_name = os.path.basename(args.weights).split('.')[0]
+    config = os.path.basename(args.opt).split(".")[0]
+    checkpoint_name = os.path.basename(args.weights).split(".")[0]
 
     result_dir = os.path.join(args.result_dir, dataset, config, checkpoint_name)
     os.makedirs(result_dir, exist_ok=True)
@@ -101,25 +112,49 @@ if __name__ == '__main__':
     ssim = []
     lpips_arr = []
 
-    # load images
-    gt_paths = [f for f in os.listdir("datasets/CL3AN/Testing/GT") if f.endswith('.png')]
-    in_paths = [f for f in glob("datasets/CL3AN/Testing/**", recursive=True) if f.endswith("_IN.png")]
+    # load images - Adapted for CL3AN
+    gt_dir = "datasets/CL3AN/test/gt"
+    input_dir = "datasets/CL3AN/test/input"
+
+    # Check if directories exist
+    if not os.path.exists(gt_dir) or not os.path.exists(input_dir):
+        print(f"Error: Dataset directories not found at {gt_dir} or {input_dir}")
+        exit(1)
 
     path_dicts = {}
+
+    # Gather all inputs
+    in_paths = sorted(
+        [
+            os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.endswith("_IN.png")
+        ]
+    )
+
     for in_path in in_paths:
-        img_id = in_path.split('/')[-1].split('_')[0]
-        gt_path = "datasets/CL3AN/GT/{}_GT.png".format(img_id)
-        path_dicts[in_path] = gt_path
+        # Naming: {ID}_{VAR}_IN.png -> {ID}_GT.png
+        filename = os.path.basename(in_path)
+        scene_id = filename.split("_")[0]
+        gt_filename = f"{scene_id}_GT.png"
+        gt_path = os.path.join(gt_dir, gt_filename)
+
+        if os.path.exists(gt_path):
+            path_dicts[in_path] = gt_path
+        else:
+            print(f"Warning: No GT found for {in_path} at {gt_path}")
+
+    print(f"Found {len(path_dicts)} paired images.")
 
     # set up LPIPS and save LPIPS per image
-    loss_fn = lpips.LPIPS(net='alex')
+    loss_fn = lpips.LPIPS(net="alex")
     loss_fn = loss_fn.cuda()
     lpips_values = {}
-    
-    
-    with torch.inference_mode():
-        for inp_path, tar_path in tqdm(path_dicts.items()) :#  tqdm(zip(input_paths, target_paths), total=len(target_paths)):
 
+    with torch.inference_mode():
+        for inp_path, tar_path in tqdm(
+            path_dicts.items()
+        ):  #  tqdm(zip(input_paths, target_paths), total=len(target_paths)):
             torch.cuda.ipc_collect()
             torch.cuda.empty_cache()
 
@@ -128,8 +163,8 @@ if __name__ == '__main__':
             h, w, _ = target.shape
 
             # img = np.float32(pad_if_needed(img)) / 255.
-            img = np.float32(img) / 255.
-            target = np.float32(target) / 255.
+            img = np.float32(img) / 255.0
+            target = np.float32(target) / 255.0
 
             img = torch.from_numpy(img).permute(2, 0, 1)
             input_ = img.unsqueeze(0).cuda()
@@ -139,11 +174,13 @@ if __name__ == '__main__':
                 # Padding in case images are not multiples of 4
                 factor = 32
                 b, c, h, w = input_.shape
-                H, W = ((h + factor) // factor) * \
-                       factor, ((w + factor) // factor) * factor
+                H, W = (
+                    ((h + factor) // factor) * factor,
+                    ((w + factor) // factor) * factor,
+                )
                 padh = H - h if h % factor != 0 else 0
                 padw = W - w if w % factor != 0 else 0
-                input_ = F.pad(input_, (0, padw, 0, padh), 'reflect')
+                input_ = F.pad(input_, (0, padw, 0, padh), "reflect")
 
                 restored = model_restoration(input_)
             elif args.mode == "inputs":
@@ -156,15 +193,30 @@ if __name__ == '__main__':
 
             lpips_arr.append(lpips_dist)
             lpips_values[inp_path] = lpips_dist
-            restored = torch.clamp(restored, 0, 1).cpu().detach().permute(0, 2, 3, 1).squeeze(0).numpy()
+            restored = (
+                torch.clamp(restored, 0, 1)
+                .cpu()
+                .detach()
+                .permute(0, 2, 3, 1)
+                .squeeze(0)
+                .numpy()
+            )
 
             psnr.append(utils.PSNR(target, restored))
-            ssim.append(utils.calculate_ssim(img_as_ubyte(target), img_as_ubyte(restored)))
+            ssim.append(
+                utils.calculate_ssim(img_as_ubyte(target), img_as_ubyte(restored))
+            )
 
             # save image to results dir
-            utils.save_img((os.path.join(result_dir, os.path.splitext(
-                    os.path.split(inp_path)[-1])[0] + '.png')), img_as_ubyte(restored))
-
+            utils.save_img(
+                (
+                    os.path.join(
+                        result_dir,
+                        os.path.splitext(os.path.split(inp_path)[-1])[0] + ".png",
+                    )
+                ),
+                img_as_ubyte(restored),
+            )
 
     psnr = np.mean(np.array(psnr))
     ssim = np.mean(np.array(ssim))
@@ -173,7 +225,7 @@ if __name__ == '__main__':
     sorted_lpips_values = dict(sorted(lpips_values.items(), key=lambda item: item[1]))
     for k, v in sorted_lpips_values.items():
         print("%s: %f" % (k, v))
-    
+
     print("PSNR: %f " % (psnr))
     print("SSIM: %f " % (ssim))
     print("LPIPS: %f " % (lpips_avg))

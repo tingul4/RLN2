@@ -4,6 +4,40 @@ To download the pretrained checkpoints and other project resources use the follo
 
 Unzip the resources and move the folder to the project root dir.
 
+# Quick Start (Environment Setup)
+
+We recommend using [uv](https://github.com/astral-sh/uv) for fast and reliable dependency management.
+
+### 1. Install uv (If not already installed)
+```bash
+curl -LsSf https://astral-sh.uv.run/install.sh | sh
+```
+
+### 2. Create and Activate Virtual Environment
+```bash
+uv venv
+source .venv/bin/activate
+```
+
+### 3. Install Dependencies
+```bash
+uv pip install -r requirements.txt
+```
+
+### 4. Install Local Package (Editable Mode)
+This step is **required** to ensure the `basicsr` module can be imported correctly from the project root.
+```bash
+uv pip install -e .
+```
+
+# Inference & Submission
+To generate a Codabench-compliant submission:
+```bash
+python basicsr/inference.py --opt Options/RLN2-Lf.yml --weights checkpoints/RLN2-Lf/best_psnr_20.51_5600.pth
+```
+The results will be saved in `RLN2_results/submission_YYYYMMDD_HHMMSS.zip`.
+
+
 # Updates
 So far we have published a minimal set of resources for our project. 
 
